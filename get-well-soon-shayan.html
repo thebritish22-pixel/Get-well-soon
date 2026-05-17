@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Get Well Soon Shayan</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  width:100vw; height:100vh;
+  background:#0a0a0f;
+  display:flex; align-items:center; justify-content:center;
+  overflow:hidden;
+  font-family:'Cormorant Garamond', serif;
+}
+
+#wrap {
+  position:relative;
+  width:380px; height:620px;
+}
+
+canvas {
+  position:absolute; top:0; left:0;
+  width:100%; height:100%;
+}
+
+/* tap overlay */
+#tap {
+  position:absolute; inset:0;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  z-index:10;
+  cursor:pointer;
+  background:radial-gradient(ellipse at 50% 60%, rgba(20,14,30,0.0) 0%, rgba(10,10,15,0.0) 100%);
+  transition: opacity 1.2s ease;
+}
+#tap.fade { opacity:0; pointer-events:none; }
+
+.tap-ring {
+  width:64px; height:64px;
+  border-radius:50%;
+  border:1px solid rgba(255,240,200,0.35);
+  display:flex; align-items:center; justify-content:center;
+  position:relative;
+  animation: ringPulse 2.4s ease-in-out infinite;
+}
+.tap-ring::before {
+  content:'';
+  position:absolute; inset:-8px;
+  border-radius:50%;
+  border:1px solid rgba(255,240,200,0.12);
+  animation: ringPulse 2.4s ease-in-out infinite 0.4s;
+}
+@keyframes ringPulse {
+  0%,100%{ transform:scale(1); opacity:0.7; }
+  50%    { transform:scale(1.08); opacity:1; }
+}
+.tap-flower {
+  font-size:22px;
+  animation: floatY 2.4s ease-in-out infinite;
+}
+@keyframes floatY {
+  0%,100%{ transform:translateY(0); }
+  50%    { transform:translateY(-4px); }
+}
+.tap-label {
+  margin-top:18px;
+  font-family:'Cormorant Garamond', serif;
+  font-style:italic;
+  font-weight:300;
+  font-size:13px;
+  letter-spacing:0.22em;
+  color:rgba(255,240,200,0.45);
+  text-transform:uppercase;
+}
+
+/* message */
+#msg {
+  position:absolute;
+  bottom:38px; left:0; right:0;
+  text-align:center;
+  opacity:0;
+  transform:translateY(14px);
+  transition: opacity 1.8s cubic-bezier(0.16,1,0.3,1), transform 1.8s cubic-bezier(0.16,1,0.3,1);
+  pointer-events:none;
+  z-index:5;
+}
+#msg.show { opacity:1; transform:translateY(0); }
+
+.msg-line1 {
+  font-family:'Great Vibes', cursive;
+  font-size:28px;
+  color:#f5ead8;
+  line-height:1.2;
+  text-shadow: 0 0 40px rgba(255,220,160,0.4), 0 0 80px rgba(255,200,120,0.15);
+  letter-spacing:0.02em;
+}
+.msg-line2 {
+  margin-top:6px;
+  font-family:'Cormorant Garamond', serif;
+  font-style:italic;
+  font-weight:300;
+  font-size:14.5px;
+  color:rgba(245,234,216,0.75);
+  letter-spacing:0.12em;
+  text-shadow: 0 0 30px rgba(255,200,120,0.2);
+}
+
+/* vignette */
+#vig {
+  position:absolute; inset:0;
+  background: radial-gradient(ellipse at 50% 55%, transparent 30%, rgba(8,6,14,0.72) 100%);
+  pointer-events:none; z-index:2;
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="vig"></div>
+
+  <div id="tap" onclick="start()">
+    <div class="tap-ring"><span class="tap-flower">🌸</span></div>
+    <p class="tap-label">tap to open</p>
+  </div>
+
+  <div id="msg">
+    <div class="msg-line1">Get Well Soon Shayan</div>
+    <div class="msg-line2">Need to see your smile again &nbsp;❤️</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const W = 380, H = 620;
+canvas.width  = W;
+canvas.height = H;
+
+let started = false;
+let t = 0; // global timer in seconds
+
+// ── palette
+const DARK_BG   = '#0a0a0f';
+const POT_CLAY  = { h:18, s:55, l:28 };
+const STEM_HUE  = 130;
+const WHITE     = [252, 248, 238];
+const YELLOW    = [248, 220, 100];
+
+// ── easing
+function easeOutExpo(x){ return x===1?1:1-Math.pow(2,-10*x); }
+function easeOutBack(x){ const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2); }
+function easeInOutCubic(x){ return x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+
+// ── hsl helper
+function hsl(h,s,l,a=1){ return `hsla(${h},${s}%,${l}%,${a})`; }
+
+// ── pot geometry
+const POT = {
+  cx: W/2,
+  rimY: H - 148,
+  rimW: 136,
+  rimH: 14,
+  bodyW: 118,
+  bodyH: 96,
+  get bodyTop(){ return this.rimY + this.rimH - 2; },
+  get bodyBot(){ return this.bodyTop + this.bodyH; },
+  soilY(){ return this.rimY + 4; }
+};
+
+// ── stem/branch data (each branch: angle from base, length, children)
+// all positions relative to soil surface centre
+const BRANCHES = [
+  { id:'main',  parent:null,   ox:0,   oy:0,   angle:-90, len:115, w:3.2 },
+  { id:'l1',    parent:'main', t:0.55, angle:-130, len:78,  w:2.2 },
+  { id:'r1',    parent:'main', t:0.55, angle:-52,  len:72,  w:2.2 },
+  { id:'l2',    parent:'l1',   t:0.5,  angle:-145, len:58,  w:1.6 },
+  { id:'r2',    parent:'r1',   t:0.5,  angle:-40,  len:54,  w:1.6 },
+  { id:'l3',    parent:'l1',   t:1.0,  angle:-165, len:46,  w:1.3 },
+  { id:'r3',    parent:'r1',   t:1.0,  angle:-20,  len:42,  w:1.3 },
+  { id:'lm',    parent:'main', t:0.78, angle:-115, len:50,  w:1.5 },
+  { id:'rm',    parent:'main', t:0.78, angle:-65,  len:46,  w:1.5 },
+];
+
+// timing: when each branch starts growing (seconds after start)
+const GROW_T = {
+  main:0.1, l1:0.6, r1:0.7, l2:1.1, r2:1.2,
+  lm:0.95, rm:1.05, l3:1.55, r3:1.65
+};
+const GROW_DUR = 0.9; // seconds each branch takes
+
+// flowers placed at tip of each branch + midpoints
+const FLOWERS = [
+  { branch:'main', t:1.0, delay:2.0, size:13 },
+  { branch:'l1',   t:1.0, delay:2.3, size:12 },
+  { branch:'r1',   t:1.0, delay:2.4, size:11.5 },
+  { branch:'l2',   t:1.0, delay:2.7, size:10.5 },
+  { branch:'r2',   t:1.0, delay:2.8, size:10 },
+  { branch:'l3',   t:1.0, delay:3.0, size:9.5 },
+  { branch:'r3',   t:1.0, delay:3.1, size:9 },
+  { branch:'lm',   t:1.0, delay:2.55, size:10 },
+  { branch:'rm',   t:1.0, delay:2.65, size:10 },
+  { branch:'l1',   t:0.45, delay:3.3, size:8 },
+  { branch:'r1',   t:0.45, delay:3.4, size:8 },
+  { branch:'main', t:0.5,  delay:3.5, size:8.5 },
+];
+
+// leaves
+const LEAVES = [
+  { branch:'l1',  t:0.55, side:1,  delay:1.8, size:14 },
+  { branch:'r1',  t:0.55, side:-1, delay:1.85,size:13 },
+  { branch:'l2',  t:0.5,  side:1,  delay:2.2, size:11 },
+  { branch:'r2',  t:0.5,  side:-1, delay:2.25,size:10 },
+  { branch:'lm',  t:0.6,  side:1,  delay:2.1, size:10 },
+  { branch:'rm',  t:0.6,  side:-1, delay:2.15,size:10 },
+  { branch:'main',t:0.35, side:1,  delay:1.6, size:12 },
+  { branch:'main',t:0.35, side:-1, delay:1.65,size:11 },
+];
+
+// ── compute branch endpoint given progress p ∈ [0,1]
+let branchCache = {}; // id → {sx,sy, ex,ey, angle}
+
+function getBranchEndpoints(branchId, p=1.0) {
+  const b = BRANCHES.find(x=>x.id===branchId);
+  let sx, sy;
+  if (!b.parent) {
+    // main branch starts at soil centre
+    sx = POT.cx;
+    sy = POT.rimY + 2;
+  } else {
+    const pb = BRANCHES.find(x=>x.id===b.parent);
+    const pe = getBranchEndpoints(pb.id, 1.0);
+    const frac = b.t;
+    sx = pe.sx + (pe.ex-pe.sx)*frac;
+    sy = pe.sy + (pe.ey-pe.sy)*frac;
+  }
+  const rad = b.angle * Math.PI/180;
+  const ex = sx + Math.cos(rad)*b.len*p;
+  const ey = sy + Math.sin(rad)*b.len*p;
+  return { sx, sy, ex, ey, angle: b.angle, len: b.len, w: b.w };
+}
+
+// ── get point along branch at fraction t
+function getBranchPoint(branchId, t) {
+  const ep = getBranchEndpoints(branchId, 1.0);
+  return {
+    x: ep.sx + (ep.ex-ep.sx)*t,
+    y: ep.sy + (ep.ey-ep.sy)*t,
+    angle: ep.angle
+  };
+}
+
+// ── particles
+const PETALS = [];
+function spawnPetal(x,y) {
+  PETALS.push({
+    x, y,
+    vx: (Math.random()-0.5)*0.6,
+    vy: -Math.random()*0.5 - 0.1,
+    alpha: Math.random()*0.5+0.3,
+    rot: Math.random()*Math.PI*2,
+    vrot: (Math.random()-0.5)*0.04,
+    r: Math.random()*2+1,
+    life:1
+  });
+}
+
+// ── glow particles
+const GLOWS = [];
+function spawnGlow(x,y){
+  GLOWS.push({ x, y,
+    vx:(Math.random()-0.5)*0.3,
+    vy:-Math.random()*0.4-0.05,
+    r: Math.random()*3+1,
+    alpha:0.18+Math.random()*0.15,
+    life:1
+  });
+}
+
+// ── draw helpers
+function drawPot(alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // body — trapezoidal
+  const bx = POT.cx - POT.bodyW/2;
+  const by = POT.bodyTop;
+  const bw = POT.bodyW;
+  const bh = POT.bodyH;
+  const narrow = 0.8;
+
+  ctx.beginPath();
+  ctx.moveTo(bx, by);
+  ctx.lineTo(bx+bw, by);
+  ctx.lineTo(bx+bw*(1+narrow)/2, by+bh);
+  ctx.lineTo(bx+bw*(1-narrow)/2, by+bh);
+  ctx.closePath();
+
+  const bodyGrad = ctx.createLinearGradient(bx, by, bx+bw, by+bh);
+  bodyGrad.addColorStop(0,   hsl(18, 58, 32));
+  bodyGrad.addColorStop(0.3, hsl(18, 52, 26));
+  bodyGrad.addColorStop(1,   hsl(16, 45, 14));
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+
+  // highlight
+  ctx.beginPath();
+  ctx.moveTo(bx+12, by+6);
+  ctx.lineTo(bx+22, by+6);
+  ctx.lineTo(bx+22+4, by+bh-8);
+  ctx.lineTo(bx+12+2, by+bh-8);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,200,140,0.07)';
+  ctx.fill();
+
+  // rim
+  ctx.beginPath();
+  ctx.ellipse(POT.cx, POT.rimY + POT.rimH/2, POT.rimW/2, POT.rimH/2, 0, 0, Math.PI*2);
+  const rimGrad = ctx.createLinearGradient(POT.cx-POT.rimW/2, POT.rimY, POT.cx+POT.rimW/2, POT.rimY+POT.rimH);
+  rimGrad.addColorStop(0, hsl(20, 60, 40));
+  rimGrad.addColorStop(0.5, hsl(18, 55, 33));
+  rimGrad.addColorStop(1, hsl(16, 48, 22));
+  ctx.fillStyle = rimGrad;
+  ctx.fill();
+
+  // rim top shine
+  ctx.beginPath();
+  ctx.ellipse(POT.cx, POT.rimY + 3, POT.rimW/2 - 8, 3, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,210,160,0.13)';
+  ctx.fill();
+
+  // soil
+  ctx.beginPath();
+  ctx.ellipse(POT.cx, POT.rimY + 5, POT.rimW/2 - 10, 7, 0, 0, Math.PI*2);
+  const soilGrad = ctx.createRadialGradient(POT.cx, POT.rimY+5, 1, POT.cx, POT.rimY+5, POT.rimW/2-10);
+  soilGrad.addColorStop(0, hsl(24, 40, 16));
+  soilGrad.addColorStop(1, hsl(20, 35, 10));
+  ctx.fillStyle = soilGrad;
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawBranch(id, p) {
+  if (p <= 0) return;
+  const b = BRANCHES.find(x=>x.id===id);
+  const ep = getBranchEndpoints(id, clamp(p,0,1));
+
+  ctx.save();
+  ctx.strokeStyle = hsl(STEM_HUE, 40, 24);
+  ctx.lineWidth = b.w * (0.7 + 0.3*p);
+  ctx.lineCap = 'round';
+  ctx.shadowColor = hsl(STEM_HUE, 50, 35);
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.moveTo(ep.sx, ep.sy);
+  // slight curve
+  const mx = (ep.sx+ep.ex)/2 + (Math.random()*0-0);
+  const my = (ep.sy+ep.ey)/2;
+  ctx.quadraticCurveTo(mx + Math.sin(b.angle*0.05)*8, my, ep.ex, ep.ey);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawLeaf(x, y, angle, size, p, side) {
+  if (p <= 0) return;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate((angle + side*60) * Math.PI/180);
+  ctx.scale(p * side, p);
+
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(size*0.6, -size*0.3, size*1.1, -size*0.1, size, 0);
+  ctx.bezierCurveTo(size*1.1, size*0.1, size*0.6, size*0.3, 0, 0);
+
+  const lg = ctx.createLinearGradient(0, 0, size, 0);
+  lg.addColorStop(0, hsl(125, 45, 20));
+  lg.addColorStop(0.5, hsl(130, 50, 28));
+  lg.addColorStop(1, hsl(135, 42, 22));
+  ctx.fillStyle = lg;
+  ctx.shadowColor = hsl(130, 60, 20);
+  ctx.shadowBlur = 6;
+  ctx.fill();
+
+  // midrib
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(size*0.9, 0);
+  ctx.strokeStyle = hsl(130, 40, 32);
+  ctx.lineWidth = 0.7;
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawJasmine(x, y, size, p, wobble=0) {
+  if (p <= 0) return;
+  const petals = 5;
+  const petalLen = size * 1.05;
+  const petalW   = size * 0.42;
+  const s = easeOutBack(clamp(p,0,1));
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(wobble);
+  ctx.scale(s, s);
+
+  // outer glow
+  const glowR = size * 2.2;
+  const glow = ctx.createRadialGradient(0,0,0,0,0,glowR);
+  glow.addColorStop(0,   `rgba(255,245,210,${0.18*s})`);
+  glow.addColorStop(0.4, `rgba(255,230,160,${0.08*s})`);
+  glow.addColorStop(1,   'rgba(255,220,140,0)');
+  ctx.beginPath();
+  ctx.arc(0,0,glowR,0,Math.PI*2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // petals
+  for (let i=0; i<petals; i++) {
+    const a = (i/petals)*Math.PI*2 - Math.PI/2;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(
+      -petalW*0.5, -petalLen*0.3,
+      -petalW*0.5, -petalLen*0.85,
+       0,          -petalLen
+    );
+    ctx.bezierCurveTo(
+       petalW*0.5, -petalLen*0.85,
+       petalW*0.5, -petalLen*0.3,
+       0,           0
+    );
+
+    const pg = ctx.createLinearGradient(0, 0, 0, -petalLen);
+    pg.addColorStop(0,   `rgba(${WHITE[0]},${WHITE[1]},${WHITE[2]},0.92)`);
+    pg.addColorStop(0.4, `rgba(${WHITE[0]},${WHITE[1]},${WHITE[2]-10},0.97)`);
+    pg.addColorStop(1,   `rgba(252,250,248,0.88)`);
+    ctx.fillStyle = pg;
+    ctx.shadowColor = 'rgba(255,240,200,0.6)';
+    ctx.shadowBlur  = 10;
+    ctx.fill();
+
+    // petal vein
+    ctx.beginPath();
+    ctx.moveTo(0, -2);
+    ctx.lineTo(0, -petalLen*0.75);
+    ctx.strokeStyle = 'rgba(200,190,170,0.25)';
+    ctx.lineWidth = 0.6;
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // centre
+  const cg = ctx.createRadialGradient(0,0,0,0,0,size*0.45);
+  cg.addColorStop(0,   `rgba(${YELLOW[0]},${YELLOW[1]},${YELLOW[2]},1)`);
+  cg.addColorStop(0.6, `rgba(240,200,70,0.95)`);
+  cg.addColorStop(1,   `rgba(220,175,50,0.8)`);
+  ctx.beginPath();
+  ctx.arc(0,0,size*0.38,0,Math.PI*2);
+  ctx.fillStyle = cg;
+  ctx.shadowColor = 'rgba(255,220,80,0.8)';
+  ctx.shadowBlur  = 8;
+  ctx.fill();
+
+  // stamens
+  for (let i=0; i<5; i++) {
+    const a = (i/5)*Math.PI*2;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a)*size*0.22, Math.sin(a)*size*0.22, 1.2, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,235,100,0.9)';
+    ctx.shadowBlur = 4;
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawBackground() {
+  // deep dark gradient
+  const bg = ctx.createRadialGradient(W/2, H*0.45, 0, W/2, H*0.45, H*0.7);
+  bg.addColorStop(0,   '#141018');
+  bg.addColorStop(0.5, '#0e0c12');
+  bg.addColorStop(1,   '#080610');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0,0,W,H);
+
+  // soft green glow from plant area
+  if (started) {
+    const gp = Math.min(1, (t-0.1)/2.5);
+    if (gp > 0) {
+      const gg = ctx.createRadialGradient(W/2, POT.rimY-80, 0, W/2, POT.rimY-80, 160);
+      gg.addColorStop(0,   `rgba(60,110,40,${0.07*gp})`);
+      gg.addColorStop(1,   'rgba(60,110,40,0)');
+      ctx.fillStyle = gg;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // white jasmine bloom glow
+    const bp = Math.min(1, Math.max(0,(t-2.0)/1.5));
+    if (bp > 0) {
+      const wg = ctx.createRadialGradient(W/2, POT.rimY-120, 0, W/2, POT.rimY-120, 200);
+      wg.addColorStop(0,   `rgba(255,245,220,${0.06*bp})`);
+      wg.addColorStop(1,   'rgba(255,245,220,0)');
+      ctx.fillStyle = wg;
+      ctx.fillRect(0,0,W,H);
+    }
+  }
+}
+
+function drawParticles() {
+  for (let i = PETALS.length-1; i>=0; i--) {
+    const p = PETALS[i];
+    ctx.save();
+    ctx.globalAlpha = p.alpha * p.life;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.beginPath();
+    ctx.ellipse(0,0,p.r*1.4,p.r*0.7,0,0,Math.PI*2);
+    ctx.fillStyle = 'rgba(252,248,235,0.9)';
+    ctx.fill();
+    ctx.restore();
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.004;
+    p.rot += p.vrot;
+    p.life -= 0.005;
+    if (p.life <= 0) PETALS.splice(i,1);
+  }
+  for (let i = GLOWS.length-1; i>=0; i--) {
+    const g = GLOWS[i];
+    ctx.save();
+    ctx.globalAlpha = g.alpha * g.life;
+    const gr = ctx.createRadialGradient(g.x,g.y,0,g.x,g.y,g.r*3);
+    gr.addColorStop(0,'rgba(255,240,180,0.9)');
+    gr.addColorStop(1,'rgba(255,230,150,0)');
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.r*3,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    g.x+=g.vx; g.y+=g.vy; g.life-=0.008;
+    if(g.life<=0) GLOWS.splice(i,1);
+  }
+}
+
+// ── main render loop
+let lastTime = null;
+let msgShown = false;
+
+function frame(ts) {
+  if (!lastTime) lastTime = ts;
+  const dt = (ts - lastTime)/1000;
+  lastTime = ts;
+
+  if (started) t += dt;
+
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+
+  if (started) {
+    // ── draw branches
+    for (const b of BRANCHES) {
+      const bt = GROW_T[b.id];
+      const p = clamp((t - bt)/GROW_DUR, 0, 1);
+      drawBranch(b.id, easeOutExpo(p));
+    }
+
+    // ── draw leaves
+    for (const l of LEAVES) {
+      const p = clamp((t - l.delay)/0.7, 0, 1);
+      if (p > 0) {
+        const pt = getBranchPoint(l.branch, l.t);
+        const ep = getBranchEndpoints(l.branch, 1.0);
+        drawLeaf(pt.x, pt.y, ep.angle, l.size, easeOutBack(p), l.side);
+      }
+    }
+
+    // ── draw flowers + spawn particles
+    let anyBloom = false;
+    for (const f of FLOWERS) {
+      const p = clamp((t - f.delay)/0.65, 0, 1);
+      if (p > 0) {
+        const pt = getBranchPoint(f.branch, f.t);
+        const wobble = Math.sin(t*1.2 + f.delay)*0.04;
+        drawJasmine(pt.x, pt.y, f.size, p, wobble);
+        if (p < 0.98 && Math.random()<0.3) spawnGlow(pt.x, pt.y);
+        if (p > 0.3 && Math.random()<0.015) spawnPetal(pt.x + (Math.random()-0.5)*10, pt.y);
+        anyBloom = true;
+      }
+    }
+
+    drawParticles();
+
+    // show message when most flowers are bloomed
+    if (!msgShown && t > 4.2) {
+      msgShown = true;
+      document.getElementById('msg').classList.add('show');
+    }
+  }
+
+  drawPot();
+  requestAnimationFrame(frame);
+}
+
+function start() {
+  if (started) return;
+  started = true;
+  document.getElementById('tap').classList.add('fade');
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
